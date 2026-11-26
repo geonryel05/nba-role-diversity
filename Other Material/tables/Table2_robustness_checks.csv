@@ -1,0 +1,17 @@
+"Statistic","Value"
+"M1 bootstrap CI low",-2.07262073570829
+"M1 bootstrap CI high",2.45513750482731
+"Spearman rho",-0.0349354703798179
+"Spearman p",0.854582726714941
+"VIF M2 Primary creator",2.11721738513437
+"VIF M2 Secondary playmaker",2.69809705627655
+"VIF M2 Off-ball scorer",1.53365183890462
+"VIF M2 Interior big",1.44676237766053
+"VIF M2-min Primary creator",2.05445509177332
+"VIF M2-min Secondary playmaker",2.26915911813999
+"VIF M2-min Off-ball scorer",1.50847887015961
+"VIF M2-min Interior big",1.11616008788105
+"M1 without BOS slope",0.822320058342805
+"M1 without BOS CI low",-1.90316257448789
+"M1 without BOS CI high",3.5478026911735
+"M1 without BOS p",0.541059734835661

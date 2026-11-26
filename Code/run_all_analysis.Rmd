@@ -1,0 +1,1087 @@
+---
+title: "NBA 로스터의 역할 다양성과 팀 Net rating: 2024–25 정규시즌 30개 팀 탐색적 분석"
+subtitle: "분석 전체 재현 문서 (원자료 → 변수 추출 → 방법 → 결과 → 원고 수치 대조)"
+author: "신건렬 (202232033, 가천대학교 응용통계학과)"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_sections: false
+    code_folding: show
+    self_contained: true
+---
+
+```{r setup, include = FALSE}
+# ---------------------------------------------------------------------------
+# knitr 기본 설정
+#   echo = TRUE    : 코드를 문서에 보여 준다 (읽는 사람이 무엇을 했는지 확인할 수 있게)
+#   message/warning: 패키지 안내문 같은 잡음은 숨긴다
+#   comment = ""   : 출력 앞에 붙는 "##" 표시를 없앤다
+# ---------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, comment = "")
+options(width = 110, scipen = 999)   # 출력 폭을 넓히고, 숫자를 지수(1e-5) 대신 소수로 표시
+```
+
+# 이 문서를 실행하는 방법
+
+이 문서 하나가 논문의 **모든 표와 그림을 원자료에서부터 다시 만든다.** 순서는 논문과 같다.
+
+| 이 문서의 절 | 논문의 위치 | 만드는 것 |
+|---|---|---|
+| 0. 준비 | — | 패키지, 난수 설정, 폴더 |
+| 1. 자료 준비 | 방법 › 자료 출처와 기간 | 원자료 확인, **사용하는 변수만 추출** |
+| 2. 분석 대상 선정 | 방법 › 분석 대상 선정, 전처리와 결측 처리 | Table S1 |
+| 3. 선수 역할 분류 | 방법 › 선수 역할 분류 | Table S2, Figure S1, Table S3 |
+| 4. 팀 단위 변수 | 방법 › 변수 | 분석용 팀 자료 |
+| 5. 결과 ① 분석 대상 | 결과 › 분석 대상 | Table 1 |
+| 6. 결과 ② 주 결과 | 결과 › 주 결과 | Table 2, Figure 1, Figure 2 |
+| 7. 결과 ③ 추가 분석 | 결과 › 추가 분석 | Table S4, S5, S6, 검정력 |
+| 8. 원고 수치 대조 | — | 원고 숫자와 자동 비교 |
+
+**실행 순서**
+
+1. 원자료 CSV 3개를 내려받아 `Input_data/raw/` 폴더에 넣는다 (방법은 1-1절에 있다).
+   원자료는 Sports Reference의 이용 정책 때문에 함께 배포하지 않는다.
+2. RStudio에서 이 파일(`Code/run_all_analysis.Rmd`)을 열고 **Knit** 버튼을 누른다.
+   작업 폴더(working directory)는 따로 정하지 않아도 된다.
+3. 필요한 패키지(ggplot2, ggrepel)가 없으면 0절에서 자동으로 설치한다.
+4. 끝나면 같은 폴더에 `run_all_analysis.html`이 생기고, 8절 표의 모든 행이 `TRUE`이면
+   원고와 같은 결과가 재현된 것이다. 실행 시간은 보통 1–2분이다.
+
+프로젝트 폴더 구조는 다음과 같아야 한다.
+
+```
+202232033_신건렬/
+├── Code/run_all_analysis.Rmd          ← 이 파일
+├── Input_data/raw/                    ← 내려받은 원자료 3개를 여기에 둔다
+│     advanced.csv, per_game.csv, team_rating.csv
+├── Input_data/processed/              ← (자동 생성) 추출 변수, 분석용 자료
+├── Codebook_for_input_data/codebook.csv
+└── Other Material/tables, figures/    ← (자동 생성) 표와 그림
+```
+
+---
+
+# 0. 준비
+
+## 0-1. 패키지
+
+```{r packages}
+# 이 분석에 필요한 R 패키지는 두 개뿐이다.
+#   ggplot2 : Figure 1, 2를 그린다
+#   ggrepel : Figure 1에서 팀 약어가 서로 겹치지 않게 배치한다
+# 나머지(주성분분석, k-평균, 회귀)는 R에 기본으로 들어 있는 stats 패키지를 쓴다.
+need <- c("ggplot2", "ggrepel")
+
+# 설치되어 있지 않은 패키지만 골라 CRAN에서 설치한다 (처음 한 번만 필요).
+missing_pkgs <- need[!vapply(need, requireNamespace, logical(1), quietly = TRUE)]
+if (length(missing_pkgs) > 0) {
+  install.packages(missing_pkgs, repos = "https://cloud.r-project.org")
+}
+library(ggplot2)
+
+# 원고 작성에 쓴 버전: R 4.3.3, ggplot2 3.4.4, ggrepel 0.9.5
+# 버전이 달라도 숫자 결과는 같다. 그림의 글꼴·여백만 조금 다를 수 있다.
+if (getRversion() < "3.6.0") stop("R 3.6.0 이상이 필요하다 (난수 생성 방식이 R 3.6.0에서 바뀌었다).")
+cat("R:", R.version.string, "\n")
+cat("ggplot2:", as.character(packageVersion("ggplot2")),
+    "/ ggrepel:", as.character(packageVersion("ggrepel")), "\n")
+```
+
+## 0-2. 난수 설정
+
+```{r rng}
+# k-평균의 초기값, 부트스트랩 같은 단계는 난수를 쓴다.
+# 컴퓨터마다 같은 난수가 나오도록 R 3.6.0 이후의 기본 난수 생성 방식을 명시적으로 지정한다.
+# (각 단계 바로 앞에서 set.seed()로 시작값을 다시 고정한다.)
+RNGkind(kind = "Mersenne-Twister", normal.kind = "Inversion", sample.kind = "Rejection")
+```
+
+## 0-3. 폴더 위치
+
+```{r paths}
+# 이 문서가 있는 위치에서 위로 한 단계씩 올라가며 'Input_data' 폴더가 있는 곳을 찾는다.
+# 그곳이 프로젝트 폴더(root)다. 그래서 어느 컴퓨터, 어느 경로에 두어도 그대로 실행된다.
+root <- normalizePath(getwd(), winslash = "/")
+while (!dir.exists(file.path(root, "Input_data")) && dirname(root) != root) {
+  root <- dirname(root)
+}
+if (!dir.exists(file.path(root, "Input_data"))) {
+  stop("Input_data 폴더를 찾지 못했다. 이 파일을 프로젝트의 Code 폴더 안에 두고 실행할 것.")
+}
+
+raw_dir  <- file.path(root, "Input_data", "raw")        # 원자료 (직접 내려받은 CSV)
+proc_dir <- file.path(root, "Input_data", "processed")  # 코드가 만드는 분석용 자료
+tab_dir  <- file.path(root, "Other Material", "tables")  # 표 (CSV)
+fig_dir  <- file.path(root, "Other Material", "figures") # 그림 (PNG)
+for (d in c(proc_dir, tab_dir, fig_dir)) dir.create(d, showWarnings = FALSE, recursive = TRUE)
+
+cat("프로젝트 폴더:", root, "\n")
+```
+
+## 0-4. 공통 도구 (숫자 표기 함수)
+
+```{r helpers}
+# 원고의 표와 똑같은 모양으로 숫자를 쓰기 위한 작은 함수들이다.
+
+# num(): 소수 d자리로 반올림해 문자로 바꾸고, 음수 기호를 원고와 같은 '−'(유니코드 마이너스)로 쓴다.
+#        반올림 결과가 0이면 "-0.00"이 아니라 "0.00"으로 쓴다.
+num <- function(x, d) {
+  x <- ifelse(abs(x) < 0.5 * 10^-d, 0, x)
+  gsub("-", "\u2212", formatC(x, format = "f", digits = d))
+}
+# pval(): p값은 소수 셋째 자리까지, 0.001보다 작으면 "< 0.001"
+pval <- function(p) ifelse(p < 0.001, "< 0.001", num(p, 3))
+# ci(): 신뢰구간을 "하한, 상한" 모양으로
+ci_txt <- function(lo, hi, d = 2) paste0(num(lo, d), ", ", num(hi, d))
+# mean_sd(), med_range(): 평균 (SD), 중앙값 [최소, 최대]
+mean_sd   <- function(x, d) paste0(num(mean(x), d), " (", num(sd(x), d), ")")
+med_range <- function(x, d) paste0(num(median(x), d), " [", num(min(x), d), ", ", num(max(x), d), "]")
+
+# show_table(): 표를 문서에 보기 좋게 출력한다. 첫 열은 왼쪽, 나머지는 가운데 정렬.
+#               (들여쓰기 공백은 HTML에서 사라지므로 줄바꿈 없는 공백으로 바꾼다.)
+show_table <- function(df) {
+  df[[1]] <- gsub("^ +", "\u00a0\u00a0\u00a0", df[[1]])
+  knitr::kable(df, align = c("l", rep("c", ncol(df) - 1)), row.names = FALSE)
+}
+# save_csv(): 표를 UTF-8 CSV로 저장한다 (어느 운영체제에서 열어도 한글이 같도록 UTF-8로 고정).
+save_csv <- function(df, file) {
+  write.csv(df, file.path(tab_dir, file), row.names = FALSE, fileEncoding = "UTF-8")
+}
+
+# 역할 이름: 코드 안에서 쓰는 이름(영문 붙여쓰기)과 표에 쓰는 이름
+role_names  <- c("PrimaryCreator", "SecondaryPlaymaker", "OffBallScorer", "InteriorBig", "LowUsageRole")
+role_labels <- c("Primary creator", "Secondary playmaker", "Off-ball scorer", "Interior big",
+                 "Low-usage role player")
+names(role_labels) <- role_names
+```
+
+---
+
+# 1. 자료 준비 (방법 › 자료 출처와 기간)
+
+## 1-1. 원자료 확인
+
+원자료는 Basketball-Reference(Sports Reference LLC)의 2024–25 NBA 정규시즌 표 3개다.
+각 페이지의 표 위에 있는 **Share & Export → Get table as CSV (for Excel)** 를 누르면
+CSV 내용이 나오며, 이것을 아래 파일 이름으로 `Input_data/raw/` 폴더에 저장한다.
+원고 분석에 쓴 파일은 2026년 6월 2–3일에 내려받았다.
+
+| 저장할 파일 이름 | 페이지 주소 | 페이지에서 고를 표 |
+|---|---|---|
+| `advanced.csv` | https://www.basketball-reference.com/leagues/NBA_2025_advanced.html | Advanced |
+| `per_game.csv` | https://www.basketball-reference.com/leagues/NBA_2025_per_game.html | Per Game |
+| `team_rating.csv` | https://www.basketball-reference.com/leagues/NBA_2025_ratings.html | Team Ratings |
+
+주의: CSV를 Excel에서 열어 다시 저장하면 숫자 형식이나 한글·특수문자(예: Şengün)가 바뀔 수 있다.
+내려받은 그대로 저장한다.
+
+```{r raw-files}
+raw_files <- c(advanced = "advanced.csv", per_game = "per_game.csv", team_rating = "team_rating.csv")
+raw_paths <- file.path(raw_dir, raw_files)
+names(raw_paths) <- names(raw_files)
+
+# 세 파일이 모두 있는지 확인한다. 하나라도 없으면 무엇이 없는지 알려 주고 멈춘다.
+if (!all(file.exists(raw_paths))) {
+  stop("원자료가 없다: ", paste(raw_files[!file.exists(raw_paths)], collapse = ", "),
+       "\n'1-1. 원자료 확인'의 표를 보고 Basketball-Reference에서 내려받아 ", raw_dir, " 에 저장할 것.")
+}
+data.frame(파일 = raw_files, 크기_KB = round(file.size(raw_paths) / 1024, 1), row.names = NULL)
+```
+
+## 1-2. 원자료 읽기
+
+```{r read-raw}
+# read_bref(): Basketball-Reference에서 내보낸 CSV를 읽는다.
+#   - 파일 맨 앞의 BOM(보이지 않는 문자), 표 위에 붙는 제목 줄이 있어도 읽을 수 있게 한다.
+#   - 열 이름은 원래 모양(TS%, 3PA 등)을 그대로 둔다 (check.names = FALSE).
+#   - 표 중간에 반복되는 머리글 줄이나 'League Average' 줄이 있으면 지운다.
+read_bref <- function(path) {
+  con <- file(path, encoding = "UTF-8-BOM")               # UTF-8로 읽고, 맨 앞 BOM은 자동으로 버린다
+  lines <- readLines(con, warn = FALSE)
+  close(con)
+  lines <- lines[nzchar(trimws(lines))]                    # 빈 줄 제거
+  header_row <- grep("(^|,)Team(,|$)", lines)[1]          # 'Team' 열이 있는 줄 = 머리글
+  df <- read.csv(text = lines[header_row:length(lines)], check.names = FALSE,
+                 stringsAsFactors = FALSE, encoding = "UTF-8")
+  if ("Rk" %in% names(df))     df <- df[!(df$Rk %in% "Rk"), ]                  # 반복 머리글 줄 제거
+  if ("Player" %in% names(df)) df <- df[!(df$Player %in% "League Average"), ]  # 리그 평균 줄 제거
+  rownames(df) <- NULL
+  df
+}
+
+adv_raw  <- read_bref(raw_paths["advanced"])     # 선수 고급 기록
+per_raw  <- read_bref(raw_paths["per_game"])     # 선수 경기당 기록
+team_raw <- read_bref(raw_paths["team_rating"])  # 팀 레이팅
+
+cat("advanced.csv   :", nrow(adv_raw),  "행 ×", ncol(adv_raw),  "열\n")
+cat("per_game.csv   :", nrow(per_raw),  "행 ×", ncol(per_raw),  "열\n")
+cat("team_rating.csv:", nrow(team_raw), "행 ×", ncol(team_raw), "열\n")
+```
+
+## 1-3. 사용하는 변수만 추출
+
+원자료에는 30개가 넘는 열이 있지만 이 연구에 쓰는 변수는 아래뿐이다.
+이 단계에서 필요한 열만 골라 이해하기 쉬운 이름으로 바꾸고, 이후 모든 분석은 추출한 자료만 쓴다.
+
+```{r select-vars}
+# 원자료의 열 이름(왼쪽) → 이 분석에서 쓰는 이름(오른쪽)
+adv_vars <- c("Player-additional" = "PlayerID",  # 선수 고유 ID (동명이인 구분, 자료 결합에 사용)
+              "Player"  = "Player",              # 선수 이름
+              "Team"    = "Team",                # 팀 약어 (이적 선수의 시즌 합계는 2TM, 3TM)
+              "Pos"     = "Pos",                 # 등록 포지션 (Table S3의 C·PF % 계산에만 사용)
+              "Age"     = "Age",                 # 나이 (Table S2)
+              "MP"      = "MP",                  # 출전시간(분, 시즌 합계) - 500분 기준과 출전시간 가중에 사용
+              "TS%"     = "TS_pct",              # 슈팅 효율 (true shooting %)        ┐
+              "TRB%"    = "TRB_pct",             # 리바운드 점유율                     │
+              "AST%"    = "AST_pct",             # 어시스트 비율                       │ 역할 분류 지표
+              "STL%"    = "STL_pct",             # 스틸 비율                           │ (7개 중 6개)
+              "BLK%"    = "BLK_pct",             # 블록 비율                           │
+              "USG%"    = "USG_pct",             # 사용률 (공격 점유율)                ┘
+              "BPM"     = "BPM")                 # Box Plus/Minus (Table S5의 기량 통제에만 사용)
+per_vars  <- c("Player-additional" = "PlayerID",
+               "Team"   = "Team",
+               "3PA"    = "FG3A_pg")             # 경기당 3점슛 시도 - 역할 분류 지표 (7번째)
+team_vars <- c("Team"   = "TeamName",            # 팀 전체 이름 (뒤에서 약어로 바꾼다)
+               "W"      = "W",                   # 승
+               "L"      = "L",                   # 패
+               "W/L%"   = "WinPct",              # 승률 (Table 1의 집단 구분에만 사용)
+               "ORtg"   = "ORtg",                # 100포제션당 득점
+               "DRtg"   = "DRtg",                # 100포제션당 실점
+               "NRtg"   = "NRtg")                # 결과변수: Net rating = ORtg − DRtg
+
+# pick(): 원하는 열만 골라 이름을 바꾼다. 열이 없으면 무엇이 없는지 알려 주고 멈춘다.
+pick <- function(df, vars, file) {
+  lost <- setdiff(names(vars), names(df))
+  if (length(lost)) stop(file, "에 다음 열이 없다: ", paste(lost, collapse = ", "),
+                         " (Basketball-Reference에서 올바른 표를 내려받았는지 확인할 것)")
+  out <- df[, names(vars)]
+  names(out) <- unname(vars)
+  out
+}
+adv_sel  <- pick(adv_raw,  adv_vars,  "advanced.csv")
+per_sel  <- pick(per_raw,  per_vars,  "per_game.csv")
+team_sel <- pick(team_raw, team_vars, "team_rating.csv")
+
+# 숫자 열은 숫자형으로 바꾼다 (빈칸은 결측 NA가 된다).
+num_cols <- function(df, keep_text) {
+  for (v in setdiff(names(df), keep_text)) df[[v]] <- suppressWarnings(as.numeric(df[[v]]))
+  df
+}
+adv_sel  <- num_cols(adv_sel,  c("PlayerID", "Player", "Team", "Pos"))
+per_sel  <- num_cols(per_sel,  c("PlayerID", "Team"))
+team_sel <- num_cols(team_sel, "TeamName")
+
+# 선수 자료 두 개를 '선수 ID + 팀'으로 붙여 선수 자료 하나로 만든다.
+# (같은 선수가 시즌 중 이적하면 팀별 행과 시즌 합계행이 따로 있으므로 팀까지 맞춰야 한다.)
+# 결합 결과는 '선수 ID → 팀' 순으로 정렬된다. 이 행 순서가 k-평균의 무작위 시작점과
+# 부트스트랩 표본을 정하므로, 원고와 같은 결과를 얻으려면 이 순서를 바꾸지 않는다.
+players_all <- merge(adv_sel, per_sel, by = c("PlayerID", "Team"))
+stopifnot("advanced.csv와 per_game.csv의 행이 모두 짝지어지지 않았다." =
+            nrow(players_all) == nrow(adv_sel))
+
+# 팀 이름을 선수 자료와 같은 세 글자 약어로 바꾼다.
+team_abbr <- c(
+  "Atlanta Hawks" = "ATL", "Boston Celtics" = "BOS", "Brooklyn Nets" = "BRK",
+  "Charlotte Hornets" = "CHO", "Chicago Bulls" = "CHI", "Cleveland Cavaliers" = "CLE",
+  "Dallas Mavericks" = "DAL", "Denver Nuggets" = "DEN", "Detroit Pistons" = "DET",
+  "Golden State Warriors" = "GSW", "Houston Rockets" = "HOU", "Indiana Pacers" = "IND",
+  "Los Angeles Clippers" = "LAC", "Los Angeles Lakers" = "LAL", "Memphis Grizzlies" = "MEM",
+  "Miami Heat" = "MIA", "Milwaukee Bucks" = "MIL", "Minnesota Timberwolves" = "MIN",
+  "New Orleans Pelicans" = "NOP", "New York Knicks" = "NYK", "Oklahoma City Thunder" = "OKC",
+  "Orlando Magic" = "ORL", "Philadelphia 76ers" = "PHI", "Phoenix Suns" = "PHO",
+  "Portland Trail Blazers" = "POR", "Sacramento Kings" = "SAC", "San Antonio Spurs" = "SAS",
+  "Toronto Raptors" = "TOR", "Utah Jazz" = "UTA", "Washington Wizards" = "WAS")
+team_sel$Team <- unname(team_abbr[trimws(team_sel$TeamName)])
+stopifnot("팀 이름을 약어로 바꾸지 못한 팀이 있다." = !anyNA(team_sel$Team))
+teams_all <- team_sel[order(team_sel$Team), c("Team", "TeamName", "W", "L", "WinPct", "ORtg", "DRtg", "NRtg")]
+rownames(teams_all) <- NULL
+
+# 추출한 자료를 저장한다. 이후 분석은 이 두 자료만 사용한다.
+write.csv(players_all, file.path(proc_dir, "players_selected.csv"), row.names = FALSE, fileEncoding = "UTF-8")
+write.csv(teams_all,   file.path(proc_dir, "teams_selected.csv"),   row.names = FALSE, fileEncoding = "UTF-8")
+
+cat("선수 자료:", nrow(players_all), "행 ×", ncol(players_all), "열  →  Input_data/processed/players_selected.csv\n")
+cat("팀 자료  :", nrow(teams_all),   "행 ×", ncol(teams_all),   "열  →  Input_data/processed/teams_selected.csv\n")
+head(players_all, 5)
+```
+
+## 1-4. 원자료가 원고 작성 때와 같은지 점검
+
+Basketball-Reference가 기록을 정정하면 내려받는 시점에 따라 값이 달라질 수 있다.
+행 수와 각 변수의 합계를 원고 분석 때 값과 비교해, 같은 자료인지 확인한다.
+
+```{r fingerprint}
+# 원고 분석(2026년 6월 2–3일 내려받은 자료)에서 구한 값
+expected <- c(
+  "선수 행 수" = 735, "팀 수" = 30,
+  "Age 합"  = 19130, "MP 합" = 664970, "TS% 합" = 402.87, "TRB% 합" = 7591.8,
+  "AST% 합" = 10695.6, "STL% 합" = 1232.1, "BLK% 합" = 1392.1, "USG% 합" = 13465.6,
+  "BPM 합"  = -1142.8, "3PA 합" = 2095.1, "승 합" = 1230, "ORtg 합" = 3438.56, "NRtg 합" = -0.01)
+observed <- c(
+  nrow(players_all), nrow(teams_all),
+  sapply(c("Age", "MP", "TS_pct", "TRB_pct", "AST_pct", "STL_pct", "BLK_pct", "USG_pct", "BPM", "FG3A_pg"),
+         function(v) sum(players_all[[v]], na.rm = TRUE)),
+  sum(teams_all$W), sum(teams_all$ORtg), sum(teams_all$NRtg))
+fp <- data.frame(항목 = names(expected), 원고_분석 = unname(expected), 지금_자료 = round(unname(observed), 4),
+                 같음 = abs(unname(expected) - unname(observed)) < 1e-6)
+fp
+if (!all(fp$같음)) {
+  warning("내려받은 원자료가 원고 분석 때와 다르다. 결과 숫자가 원고와 조금 다를 수 있다.")
+}
+```
+
+---
+
+# 2. 분석 대상 선정 (방법 › 분석 대상 선정, 전처리와 결측 처리)
+
+분석 단위는 **팀(N = 30)** 이다. 표본은 두 가지 목적으로 따로 만든다.
+
+* **역할 분류 표본 (선수 1명 = 1행):** 이적하지 않은 선수는 그 팀 행, 이적한 선수는 시즌 합계행(2TM·3TM)
+  하나만 쓴다. 출전시간이 너무 적으면 비율 지표가 불안정하므로 **시즌 500분 이상**인 선수만 남긴다.
+* **팀 집계 표본 (선수-팀 기록):** 각 팀에서 **그 팀 소속으로 500분 이상** 뛴 기록만 그 팀의 로스터로 본다.
+
+```{r sample}
+# is_multi(): 팀 약어가 2TM, 3TM처럼 '숫자+TM'이면 이적 선수의 시즌 합계행이다.
+is_multi <- function(team) grepl("^[0-9]TM$", team)
+
+# (가) 역할 분류 표본
+traded  <- unique(players_all$PlayerID[is_multi(players_all$Team)])     # 이적한 선수의 ID
+seasons <- players_all[is_multi(players_all$Team) |                     # 이적 선수: 합계행만
+                       !(players_all$PlayerID %in% traded), ]           # 나머지: 원래 행
+stopifnot("선수가 두 번 이상 들어갔다." = !anyDuplicated(seasons$PlayerID))
+players <- subset(seasons, MP >= 500)                                   # 시즌 500분 이상
+
+# (나) 팀 집계 표본
+single <- players_all[!is_multi(players_all$Team), ]                    # 팀별 행만 (합계행 제외)
+stints <- subset(single, MP >= 500)                                     # 그 팀에서 500분 이상
+
+# Table S1. 표본 흐름
+tabS1 <- data.frame(
+  단계 = c("advanced.csv의 선수-팀 기록",
+           "   그중 이적 선수의 다팀 합계행 (2TM/3TM)",
+           "per_game.csv와 결합 (선수 ID + 팀; 미결합 0)",
+           "[역할 분류] 선수-시즌 기록 (선수당 1행; 이적 선수는 합계행)",
+           "   제외: 시즌 MP < 500",
+           "   PCA·k-평균 표본 (선수 수)",
+           "[팀 집계] 단일 팀 선수-팀 기록",
+           "   제외: 해당 팀 MP < 500",
+           "   팀별 역할 집계에 사용한 선수-팀 기록",
+           "분석 대상 팀"),
+  n = c(nrow(adv_sel), sum(is_multi(adv_sel$Team)), nrow(players_all),
+        nrow(seasons), sum(seasons$MP < 500), nrow(players),
+        nrow(single), sum(single$MP < 500), nrow(stints), length(unique(stints$Team))))
+save_csv(tabS1, "TableS1_sample_flow.csv")
+```
+
+**Table S1. 표본 흐름과 제외 기준 (선수 수준)**
+
+```{r tabS1-show, echo = FALSE}
+show_table(tabS1)
+```
+
+주: 735건 전부가 선수 ID + 팀 기준으로 per_game.csv와 결합되었다. 이적 선수(`r length(traded)`명)는 역할 분류에서
+시즌 합계행 1행만 쓰고, 팀 집계에서는 해당 팀에서 500분 이상 뛴 팀별 행에 그 선수의 역할을 붙였다.
+
+```{r missing}
+# 결측값 점검 (방법 › 전처리와 결측 처리)
+pca_vars <- c("TS_pct", "TRB_pct", "AST_pct", "STL_pct", "BLK_pct", "USG_pct", "FG3A_pg")  # 역할 분류 지표 7개
+cat("전체 선수-팀 기록에서 변수별 결측 수:\n")
+print(colSums(is.na(players_all[, c("Age", "MP", pca_vars)])))
+cat("\n결측이 있는 선수의 출전시간(분):", players_all$MP[is.na(players_all$TS_pct)], "\n")
+cat("→ 모두 500분 미만이어서 분석 표본에서 빠진다. 분석 표본의 결측 수:",
+    sum(is.na(players[, pca_vars])), "\n")
+stopifnot(!anyNA(players[, pca_vars]))   # 분석 표본에는 결측이 없어야 한다 (결측 대체를 하지 않음)
+```
+
+---
+
+# 3. 선수 역할 분류 (방법 › 선수 역할 분류)
+
+375명의 선수를 7개 지표로 비슷한 선수끼리 묶는다. 순서는
+① 지표 표준화 → ② 주성분분석(PCA)으로 정보 요약 → ③ k-평균 군집분석으로 5개 묶음 → ④ 묶음에 이름 붙이기다.
+
+## 3-1. 입력 변수 요약 (Table S2)
+
+```{r tabS2}
+s2_vars <- c(Age = "나이 (세)", MP = "총 출전시간 (분, 시즌 합계)", TS_pct = "TS% (비율)",
+             TRB_pct = "TRB% (%)", AST_pct = "AST% (%)", STL_pct = "STL% (%)", BLK_pct = "BLK% (%)",
+             USG_pct = "USG% (%)", FG3A_pg = "3PA (경기당)")
+s2_dig  <- c(Age = 1, MP = 0, TS_pct = 3, TRB_pct = 1, AST_pct = 1, STL_pct = 1, BLK_pct = 1,
+             USG_pct = 1, FG3A_pg = 1)                       # 원고에 쓴 소수 자릿수
+tabS2 <- data.frame(변수 = unname(s2_vars),
+                    `평균 (SD)` = sapply(names(s2_vars), function(v) mean_sd(players[[v]], s2_dig[[v]])),
+                    `중앙값 [최소, 최대]` = sapply(names(s2_vars), function(v) med_range(players[[v]], s2_dig[[v]])),
+                    check.names = FALSE, row.names = NULL)
+save_csv(tabS2, "TableS2_player_inputs.csv")
+```
+
+**Table S2. PCA·k-평균 입력 변수의 선수 수준 기술통계 (시즌 MP ≥ 500, n = `r nrow(players)`)**
+
+```{r tabS2-show, echo = FALSE}
+show_table(tabS2)
+```
+
+주: TRB%, AST%, STL%, BLK%, USG%는 Basketball-Reference의 백분율 추정치(0–100)이고 TS%는 비율, 3PA는 경기당 값이다.
+PCA 전에 변수를 표준화했다. 이적 선수는 시즌 합계 값이다.
+
+## 3-2. 주성분분석 (PCA)
+
+```{r pca}
+# 7개 지표는 단위가 서로 다르다(비율, %, 경기당 개수). 평균 0, 표준편차 1로 맞춘 뒤(center, scale.)
+# 서로 겹치는 정보를 몇 개의 축(주성분)으로 요약한다.
+pca <- prcomp(players[, pca_vars], center = TRUE, scale. = TRUE)
+
+# 주성분별 설명 분산: 상위 4개가 전체 정보의 84.6%를 담는다 (3개까지는 74.4%).
+round(summary(pca)$importance[, 1:5], 3)
+
+# 상위 4개 주성분 점수를 군집분석에 쓴다.
+scores <- pca$x[, 1:4]
+```
+
+## 3-3. 군집 수 정하기 (Figure S1)
+
+```{r elbow}
+# k = 1~10개로 묶어 보고, 묶음 안의 흩어짐(군집 내 제곱합, WSS)이 얼마나 줄어드는지 본다.
+# 줄어드는 폭이 갑자기 작아지는 지점('팔꿈치')이 적당한 군집 수의 후보다.
+wss <- sapply(1:10, function(k) {
+  set.seed(123)
+  kmeans(scores, centers = k, nstart = 50)$tot.withinss
+})
+
+png(file.path(fig_dir, "FigureS1_kmeans_elbow.png"), width = 1200, height = 840, res = 200)
+plot(1:10, wss, type = "b", pch = 19, xlab = "Number of clusters (k)",
+     ylab = "Total within-cluster sum of squares",
+     main = "Elbow plot, k-means on 4 principal components")
+abline(v = 5, lty = 2, col = "grey50")
+invisible(dev.off())
+```
+
+**Figure S1. k-평균 군집 수에 따른 군집 내 제곱합 (elbow plot)**
+
+```{r figS1-show, echo = FALSE, out.width = "70%"}
+knitr::include_graphics(file.path(fig_dir, "FigureS1_kmeans_elbow.png"))
+```
+
+주: 상위 4개 주성분 점수에 대한 k-평균(k = 1–10). 점선: 사용한 k = 5.
+
+WSS만으로는 k = 4와 5 사이에 뚜렷한 차이가 없다. 전통적인 포지션 수와 같아 비교하기 쉽고,
+다섯 개의 새 역할을 제시한 선행연구(Bianchi et al., 2017)와도 맞으며, 군집을 해석할 수 있다는 점을 함께 고려해
+**k = 5**로 정했다. 이 선택의 영향은 7-4절(Table S6)에서 k = 4, 6으로 다시 확인한다.
+
+## 3-4. k-평균 군집분석 (k = 5)
+
+```{r kmeans}
+# k-평균은 시작점(초기값)에 따라 결과가 달라질 수 있다.
+# 무작위 시작점 1,000개로 실행해 가장 잘 묶인 해(WSS 최소)를 고르면 seed와 관계없이 같은 해가 나온다.
+set.seed(123)
+km <- kmeans(scores, centers = 5, nstart = 1000, iter.max = 100)
+players$Cluster <- km$cluster
+table(군집 = players$Cluster)
+```
+
+## 3-5. 군집에 역할 이름 붙이기
+
+```{r role-names}
+# 군집 번호(1~5)는 의미가 없으므로, 각 군집의 지표 평균(표준화 값)을 보고 정해진 순서로 이름을 붙인다.
+#   ① BLK%가 가장 높은 군집                  → Interior big        (블록·리바운드가 많은 빅맨)
+#   ② USG%가 가장 높은 군집                  → Primary creator     (공을 가장 많이 다루는 주 득점원)
+#   ③ 남은 셋 중 USG%가 가장 낮은 군집       → Low-usage role player (공을 적게 다루는 역할 선수)
+#   ④ 남은 둘 중 AST%가 높은 군집            → Secondary playmaker (보조 볼 핸들러)
+#   ⑤ 마지막 군집                            → Off-ball scorer     (공 없이 움직이며 3점을 던지는 선수)
+z <- scale(players[, pca_vars])                                          # 표준화 점수
+prof_z <- aggregate(as.data.frame(z), by = list(Cluster = players$Cluster), FUN = mean)
+
+lab <- setNames(rep(NA_character_, 5), prof_z$Cluster)
+pick_cluster <- function(col, fun) {                                     # 아직 이름이 없는 군집 중에서 고른다
+  left <- prof_z[is.na(lab[as.character(prof_z$Cluster)]), ]
+  as.character(left$Cluster[fun(left[[col]])])
+}
+lab[pick_cluster("BLK_pct", which.max)] <- "InteriorBig"
+lab[pick_cluster("USG_pct", which.max)] <- "PrimaryCreator"
+lab[pick_cluster("USG_pct", which.min)] <- "LowUsageRole"
+lab[pick_cluster("AST_pct", which.max)] <- "SecondaryPlaymaker"
+lab[is.na(lab)]                         <- "OffBallScorer"
+stopifnot(setequal(lab, role_names))
+players$Role <- factor(lab[as.character(players$Cluster)], levels = role_names)
+table(역할 = role_labels[as.character(players$Role)])
+```
+
+## 3-6. 역할 프로파일 (Table S3)
+
+```{r tabS3}
+# 역할별 원 단위 평균, 선수 수, C 또는 PF로 등록된 비율, 출전시간 상위 선수
+prof <- aggregate(players[, c(pca_vars, "MP")], by = list(Role = players$Role), FUN = mean)
+prof$n           <- as.vector(table(players$Role)[as.character(prof$Role)])
+prof$C_or_PF_pct <- sapply(as.character(prof$Role), function(r)
+  100 * mean(players$Pos[players$Role == r] %in% c("C", "PF")))
+prof$Examples    <- sapply(as.character(prof$Role), function(r) {
+  o <- players[players$Role == r, ]
+  paste(head(o$Player[order(-o$MP)], 3), collapse = ", ")
+})
+prof <- prof[match(role_names, prof$Role), ]
+save_csv(prof, "TableS3_role_profiles.csv")
+
+tabS3 <- data.frame(역할 = role_labels[as.character(prof$Role)], n = prof$n,
+                    `TS%` = num(prof$TS_pct, 3), `TRB%` = num(prof$TRB_pct, 1),
+                    `AST%` = num(prof$AST_pct, 1), `STL%` = num(prof$STL_pct, 2),
+                    `BLK%` = num(prof$BLK_pct, 2), `USG%` = num(prof$USG_pct, 1),
+                    `3PA` = num(prof$FG3A_pg, 1), `C·PF %` = num(prof$C_or_PF_pct, 0),
+                    check.names = FALSE, row.names = NULL)
+```
+
+```{r stability}
+# 군집 안정성: 선수를 복원추출로 다시 뽑아(부트스트랩 200회) 군집을 다시 나누고,
+# 원래 군집과 얼마나 같은지 adjusted Rand index(ARI; 1 = 완전히 같음, 0 = 우연 수준)로 잰다.
+ari <- function(a, b) {
+  t <- table(a, b); c2 <- function(x) sum(choose(x, 2))
+  e <- c2(rowSums(t)) * c2(colSums(t)) / choose(sum(t), 2)
+  (c2(t) - e) / ((c2(rowSums(t)) + c2(colSums(t))) / 2 - e)
+}
+set.seed(2026)
+boot_ari <- replicate(200, {
+  i <- sample(nrow(scores), replace = TRUE)
+  ari(km$cluster[i], kmeans(scores[i, ], 5, nstart = 50, iter.max = 100)$cluster)
+})
+stab <- data.frame(Statistic = c("Bootstrap ARI mean", "Bootstrap ARI median",
+                                 "Bootstrap ARI 2.5%", "Bootstrap ARI 97.5%",
+                                 "Cumulative variance, PC1-4", "Players (MP >= 500)"),
+                   Value = c(mean(boot_ari), median(boot_ari), quantile(boot_ari, c(.025, .975)),
+                             summary(pca)$importance[3, 4], nrow(players)))
+save_csv(stab, "TableS3b_role_cluster_stability.csv")
+```
+
+**Table S3. 선수 역할 군집의 프로파일 (선수-시즌 표본, n = `r nrow(players)`)**
+
+```{r tabS3-show, echo = FALSE}
+show_table(tabS3)
+```
+
+주: 각 지표는 군집 평균이다. C·PF % = 등록 포지션이 C 또는 PF인 선수 비율.
+출전시간 상위 선수 — `r paste0(role_labels, ": ", prof$Examples, collapse = "; ")`.
+주성분 4개의 누적 설명 분산 `r num(100 * summary(pca)$importance[3, 4], 1)`%.
+군집 안정성: 선수 부트스트랩 200회의 adjusted Rand index 평균 `r num(mean(boot_ari), 2)`(중앙값 `r num(median(boot_ari), 2)`,
+2.5–97.5% `r num(quantile(boot_ari, .025), 2)`–`r num(quantile(boot_ari, .975), 2)`).
+
+---
+
+# 4. 팀 단위 변수 만들기 (방법 › 변수)
+
+각 팀에서 500분 이상 뛴 선수(387건)에게 3절의 역할을 붙이고, 팀마다 다음을 계산한다.
+
+* **Roster size**: 그 팀에서 500분 이상 뛴 선수 수
+* **Role share (인원 기준)**: 역할별 선수 수 ÷ Roster size
+* **Role share (출전시간 기준, 민감도 분석용)**: 역할별 출전시간 합 ÷ 로스터 전체 출전시간 합
+* **Role diversity**: Shannon 지수 H′ = −Σ pᵢ ln pᵢ (자연로그). 다섯 역할이 똑같이 있으면 최댓값 ln 5 = 1.61,
+  한 역할만 있으면 0이다.
+
+```{r team-data}
+# 팀별 기록에 그 선수의 역할을 붙인다 (이적 선수도 시즌 전체로 분류한 역할 하나를 쓴다).
+stints$Role <- players$Role[match(stints$PlayerID, players$PlayerID)]
+stopifnot(!anyNA(stints$Role))            # 그 팀에서 500분 이상이면 시즌 전체도 500분 이상이다
+write.csv(stints[, c("PlayerID", "Player", "Team", "Pos", "MP", "Role")],
+          file.path(proc_dir, "player_roles.csv"), row.names = FALSE, fileEncoding = "UTF-8")
+
+# 팀 × 역할 표: 선수 수(cnt)와 출전시간 합(mins)
+cnt  <- as.data.frame.matrix(table(stints$Team, stints$Role))[, role_names]
+mins <- as.data.frame.matrix(xtabs(MP ~ Team + Role, data = stints))[, role_names]
+
+shannon <- function(x) { p <- x[x > 0] / sum(x); -sum(p * log(p)) }  # Shannon 지수 (0인 역할은 빼고 계산)
+
+dat <- data.frame(Team = rownames(cnt), cnt, row.names = NULL)
+dat <- merge(dat, teams_all, by = "Team")
+stopifnot("팀 자료와 결합된 팀이 30개가 아니다." = nrow(dat) == 30)
+dat$TotalPlayers <- rowSums(dat[, role_names])
+dat$TotalMinutes <- rowSums(mins[dat$Team, ])
+for (r in role_names) {
+  dat[[paste0(r, "_pct")]]     <- dat[[r]] / dat$TotalPlayers              # 인원 기준 비중
+  dat[[paste0(r, "_min_pct")]] <- mins[dat$Team, r] / dat$TotalMinutes     # 출전시간 기준 비중
+}
+dat$RoleDiversity     <- apply(dat[, role_names], 1, shannon)              # 인원 기준 H′ (주 분석)
+dat$RoleDiversity_min <- apply(mins[dat$Team, ], 1, shannon)               # 출전시간 기준 H′ (민감도)
+
+# 점검: 결측 없음, 로스터 합 = 387, 비중의 합 = 1
+stopifnot(!anyNA(dat), sum(dat$TotalPlayers) == nrow(stints),
+          all(abs(rowSums(dat[, paste0(role_names, "_pct")]) - 1) < 1e-12))
+write.csv(dat, file.path(proc_dir, "team_analysis_data.csv"), row.names = FALSE, fileEncoding = "UTF-8")
+head(dat[, c("Team", "NRtg", "TotalPlayers", "RoleDiversity", paste0(role_names, "_pct"))], 5)
+```
+
+---
+
+# 5. 결과 ① 분석 대상 (Table 1)
+
+```{r tab1}
+# 승률 .500 이상 / 미만 두 집단으로 나누어 기술통계를 낸다 (기술 목적이며 회귀에는 쓰지 않는다).
+dat$Group <- ifelse(dat$WinPct >= 0.5, "hi", "lo")
+stopifnot(all(dat$W + dat$L == 82))
+
+# t1_row(): 표의 한 줄. v = 변수 이름, d = 소수 자릿수. 비중(_pct)은 100을 곱해 %로 쓴다.
+t1_row <- function(label, v = NULL, d = NULL) {
+  if (is.null(v)) return(c(label, "", "", "", ""))
+  x <- dat[[v]] * if (grepl("_pct$", v)) 100 else 1
+  c(label, mean_sd(x, d), med_range(x, d),
+    mean_sd(x[dat$Group == "hi"], d), mean_sd(x[dat$Group == "lo"], d))
+}
+rows <- list(
+  c("팀 수, n", "30", "", as.character(sum(dat$Group == "hi")), as.character(sum(dat$Group == "lo"))),
+  t1_row("Team performance (100포제션당)"),
+  t1_row("Net rating (NRtg)", "NRtg", 2),
+  t1_row("Offensive rating (ORtg)", "ORtg", 2),
+  t1_row("Defensive rating (DRtg)", "DRtg", 2),
+  t1_row("승률 (W/L%)", "WinPct", 3),
+  t1_row("Wins (82경기 중)", "W", 1),
+  t1_row("Roster composition"),
+  t1_row("Roster size (MP ≥ 500 선수 수)", "TotalPlayers", 1),
+  t1_row("Role diversity (Shannon H′, nat)ᵃ", "RoleDiversity", 2),
+  t1_row("Role count (팀당 선수 수)ᵇ"))
+for (r in role_names) rows[[length(rows) + 1]] <- t1_row(paste0("   ", role_labels[r]), r, 1)
+rows[[length(rows) + 1]] <- t1_row("Role share, 인원 기준 (%)ᵇ")
+for (r in role_names) rows[[length(rows) + 1]] <- t1_row(paste0("   ", role_labels[r]), paste0(r, "_pct"), 1)
+rows[[length(rows) + 1]] <- t1_row("Role share, 출전시간 기준 (%)ᶜ")
+for (r in role_names) rows[[length(rows) + 1]] <- t1_row(paste0("   ", role_labels[r]), paste0(r, "_min_pct"), 1)
+
+tab1 <- as.data.frame(do.call(rbind, rows), stringsAsFactors = FALSE)
+names(tab1) <- c("특성", "전체 (N = 30) 평균 (SD)", "전체 중앙값 [최소, 최대]",
+                 paste0("승률 ≥ .500 (n = ", sum(dat$Group == "hi"), ") 평균 (SD)"),
+                 paste0("승률 < .500 (n = ", sum(dat$Group == "lo"), ") 평균 (SD)"))
+save_csv(tab1, "Table1_team_characteristics.csv")
+```
+
+**Table 1. 분석 대상 NBA 30개 팀의 특성, 2024–25 정규시즌 (전체 및 승률 집단별)**
+
+```{r tab1-show, echo = FALSE}
+show_table(tab1)
+```
+
+분석단위: 팀(N = 30). 중앙값 [최소, 최대]를 표시한 열을 제외하면 평균(SD)이다. 레이팅 변수는 100포제션당 점수(Basketball-Reference)이며
+NRtg = ORtg − DRtg이다. W/L% = Wins/82; 집단은 W/L% ≥ .500(n = 15, 41승 41패인 올랜도 포함)과 < .500(n = 15)로 구분했다.
+ᵃ Shannon index H′ = −Σ pᵢ ln pᵢ (5개 역할에 대한 합, pᵢ = 인원 기준 비중; 자연로그; 범위 0~ln 5 = 1.61).
+ᵇ 인원 기준 Role share는 Roster size(해당 팀에서 MP ≥ 500인 선수 수)를 분모로 한다.
+ᶜ 출전시간 기준 Role share = 해당 역할 선수들의 그 팀 출전시간 합 / Roster 선수 전체의 그 팀 출전시간 합.
+
+---
+
+# 6. 결과 ② 주 결과 (Table 2, Figure 1, Figure 2)
+
+## 6-1. 회귀모형
+
+분석 전에 정한 두 개의 최소제곱(OLS) 회귀모형이 주 분석이다.
+
+* **모형 1:** Net rating = 절편 + 기울기 × Role diversity → "다양성이 높은 팀일수록 Net rating이 높은가?"
+* **모형 2:** Net rating = 절편 + 네 역할의 Role share → "특정 역할의 비중이 Net rating과 관련되는가?"
+  다섯 비중의 합은 1이므로 Low-usage role player를 **기준 범주**로 빼고, 각 계수는
+  "Low-usage role player 비중을 10%p 줄이고 그 역할을 10%p 늘렸을 때 Net rating의 차이"로 읽는다.
+
+계수를 읽기 쉽게 다양성은 **0.1 nat당**, 비중은 **10%포인트당**으로 단위를 바꾼다.
+출전시간 기준으로 계산한 모형 1m, 2m(민감도 분석)도 여기서 함께 적합한다(Figure 2에 함께 그리기 때문).
+
+```{r models}
+roles4  <- role_names[1:4]                                   # 기준 범주(LowUsageRole)를 뺀 네 역할
+labels4 <- role_labels[roles4]
+
+dat$Div01     <- dat$RoleDiversity * 10                      # +0.1 nat 단위
+dat$Div01_min <- dat$RoleDiversity_min * 10
+for (r in roles4) {
+  dat[[paste0(r, "_10")]]     <- dat[[paste0(r, "_pct")]] * 10      # +10%p 단위
+  dat[[paste0(r, "_min_10")]] <- dat[[paste0(r, "_min_pct")]] * 10
+}
+
+f1  <- NRtg ~ Div01                                          # 모형 1
+f2  <- reformulate(paste0(roles4, "_10"), "NRtg")            # 모형 2
+f1m <- NRtg ~ Div01_min                                      # 모형 1m (출전시간 기준)
+f2m <- reformulate(paste0(roles4, "_min_10"), "NRtg")        # 모형 2m (출전시간 기준)
+m1  <- lm(f1, data = dat);  m2  <- lm(f2, data = dat)
+m1m <- lm(f1m, data = dat); m2m <- lm(f2m, data = dat)
+summary(m1)
+summary(m2)
+```
+
+## 6-2. 예측력과 모형 적합도
+
+```{r fit-stats}
+# leave-one-out 교차검증: 팀 하나를 빼고 나머지 29개 팀으로 모형을 만든 뒤 빠진 팀을 예측한다.
+# 30번 반복한 예측 오차의 제곱평균제곱근(RMSE)이 작을수록 예측을 잘한다.
+# 평균만 쓴 모형(NRtg ~ 1)보다 RMSE가 크면, 그 변수는 예측에 도움이 되지 않는다는 뜻이다.
+loo_rmse <- function(formula) {
+  e <- sapply(seq_len(nrow(dat)), function(i) {
+    fit <- lm(formula, data = dat[-i, ])
+    dat$NRtg[i] - predict(fit, newdata = dat[i, , drop = FALSE])
+  })
+  sqrt(mean(e^2))
+}
+rmse_null <- loo_rmse(NRtg ~ 1)
+
+fitstat <- function(m, f, model) {
+  s <- summary(m); fs <- s$fstatistic
+  data.frame(Model = model, n = nobs(m), R2 = s$r.squared, Adj_R2 = s$adj.r.squared,
+             Residual_SD = s$sigma, F_p = pf(fs[1], fs[2], fs[3], lower.tail = FALSE),
+             LOOCV_RMSE = loo_rmse(f), LOOCV_RMSE_null = rmse_null, row.names = NULL)
+}
+fits <- rbind(fitstat(m1, f1, "M1"), fitstat(m2, f2, "M2"),
+              fitstat(m1m, f1m, "M1-min"), fitstat(m2m, f2m, "M2-min"))
+save_csv(fits, "Table2_model_fit.csv")
+fits
+```
+
+## 6-3. Table 2
+
+```{r tab2}
+# 계수 표를 원고와 같은 모양(추정치 | 95% CI | p)으로 만든다.
+tidy <- function(m, model) {
+  s <- summary(m)$coefficients; ci <- confint(m)
+  data.frame(Model = model, Term = rownames(s), Estimate = s[, 1], SE = s[, 2],
+             CI_low = ci[, 1], CI_high = ci[, 2], p = s[, 4], row.names = NULL)
+}
+save_csv(rbind(tidy(m1, "M1"), tidy(m2, "M2")), "Table2_main_models.csv")
+
+coef_lines <- function(m, labels) {      # labels: 절편부터 순서대로 표에 쓸 이름
+  s <- summary(m)$coefficients; ci <- confint(m)
+  data.frame(항 = labels, 추정치 = num(s[, 1], 2), `95% CI` = ci_txt(ci[, 1], ci[, 2]),
+             p = pval(s[, 4]), check.names = FALSE, row.names = NULL)
+}
+section <- function(title) data.frame(항 = title, 추정치 = "", `95% CI` = "", p = "", check.names = FALSE)
+fit_lines <- function(fa, fb, a, b) {    # 두 모형의 적합도를 "A / B" 모양으로
+  pair <- function(x, y, d) paste0(num(x, d), " / ", num(y, d))
+  data.frame(항 = c(paste0("n (팀 수) — ", a, " / ", b),
+                    paste0("R² / 수정 R² — ", a), paste0("R² / 수정 R² — ", b),
+                    paste0("잔차 SD (100포제션당 점수) — ", a, " / ", b),
+                    paste0("전체 F검정 p — ", a, " / ", b),
+                    paste0("Leave-one-out RMSE (평균만 쓴 모형: ", num(rmse_null, 2), ") — ", a, " / ", b)),
+             추정치 = c(paste0(fa$n, " / ", fb$n), pair(fa$R2, fa$Adj_R2, 3), pair(fb$R2, fb$Adj_R2, 3),
+                        pair(fa$Residual_SD, fb$Residual_SD, 2), pair(fa$F_p, fb$F_p, 3),
+                        pair(fa$LOOCV_RMSE, fb$LOOCV_RMSE, 2)),
+             `95% CI` = "", p = "", check.names = FALSE)
+}
+share_labels <- paste0(labels4, ", +10%p당")
+tab2 <- rbind(section("모형 1: Role diversity"),
+              coef_lines(m1, c("절편", "Role diversity, +0.1 nat당")),
+              section("모형 2: Role share (기준: Low-usage role player)"),
+              coef_lines(m2, c("절편", share_labels)),
+              section("모형 적합도와 예측력"),
+              fit_lines(fits[1, ], fits[2, ], "M1", "M2"))
+```
+
+```{r robust}
+# 표 아래 주에 들어가는 견고성 점검
+# (1) 부트스트랩: 팀을 복원추출로 5,000번 다시 뽑아 모형 1 기울기를 다시 구하고, 가운데 95% 구간을 본다.
+set.seed(123)
+boot_b  <- replicate(5000, { i <- sample(nrow(dat), replace = TRUE); coef(lm(f1, data = dat[i, ]))[2] })
+boot_ci <- quantile(boot_b, c(0.025, 0.975))
+# (2) Spearman 순위상관: 직선 관계를 가정하지 않고 순위만으로 본 연관
+sp <- cor.test(dat$RoleDiversity, dat$NRtg, method = "spearman", exact = FALSE)
+# (3) 영향점: 다양성이 가장 낮은 팀(보스턴, H′ = 1.09)을 빼고 모형 1을 다시 적합
+low_team <- dat$Team[which.min(dat$RoleDiversity)]
+m1_drop  <- lm(f1, data = dat[dat$Team != low_team, ])
+# (4) 다중공선성: 분산팽창계수(VIF). 보통 5~10을 넘으면 문제로 본다.
+vif <- function(m) {
+  X <- model.matrix(m)[, -1]
+  sapply(colnames(X), function(v) 1 / (1 - summary(lm(X[, v] ~ X[, colnames(X) != v]))$r.squared))
+}
+extra <- data.frame(
+  Statistic = c("M1 bootstrap CI low", "M1 bootstrap CI high", "Spearman rho", "Spearman p",
+                paste("VIF M2", labels4), paste("VIF M2-min", labels4),
+                paste("M1 without", low_team, c("slope", "CI low", "CI high", "p"))),
+  Value = c(boot_ci, sp$estimate, sp$p.value, vif(m2), vif(m2m),
+            coef(m1_drop)[2], confint(m1_drop)[2, ], summary(m1_drop)$coefficients[2, 4]))
+save_csv(extra, "Table2_robustness_checks.csv")
+```
+
+**Table 2. Role diversity·Role composition과 팀 Net rating의 연관성 (OLS, N = 30팀, 2024–25)**
+
+```{r tab2-show, echo = FALSE}
+show_table(tab2)
+```
+
+OLS 회귀; 결과변수 = Net rating(ORtg − DRtg, 100포제션당 점수). 추정치는 Net rating의 변화량이며, CI = t 기반 95% 신뢰구간,
+p = 양측 t검정이다. 네 비중의 variance inflation factor(VIF): `r paste(num(vif(m2), 2), collapse = ", ")`.
+모형 1 기울기(+0.1 nat당)의 부트스트랩 95% CI(5,000회, seed 123): `r num(boot_ci[1], 2)`~`r num(boot_ci[2], 2)`.
+Spearman ρ(다양성 대 Net rating) = `r num(sp$estimate, 2)` (p = `r num(sp$p.value, 2)`).
+다양성이 가장 낮은 보스턴(H′ = `r num(min(dat$RoleDiversity), 2)`)을 빼면 모형 1 기울기는
++`r num(coef(m1_drop)[2], 1)`(95% CI `r num(confint(m1_drop)[2, 1], 1)`~`r num(confint(m1_drop)[2, 2], 1)`)이었다.
+
+## 6-4. Figure 1
+
+```{r fig1}
+ci1 <- confint(m1)
+# 팀 약어 배치(ggrepel)는 좌표가 1e-15만 달라도 위치가 바뀔 수 있다.
+# 그래서 그림용 좌표를 저장 자료(CSV)와 같은 15자리 유효숫자로 맞춰, 언제 실행해도 같은 배치가 나오게 한다.
+plot_dat <- data.frame(Team = dat$Team, RoleDiversity = signif(dat$RoleDiversity, 15), NRtg = dat$NRtg)
+p1 <- ggplot(plot_dat, aes(RoleDiversity, NRtg)) +
+  geom_hline(yintercept = 0, linetype = "dotted", colour = "grey50") +        # Net rating 0 기준선
+  geom_smooth(method = "lm", formula = y ~ x, colour = "#e74c3c", fill = "#e74c3c",
+              alpha = 0.18, se = TRUE) +                                      # 회귀선과 95% 신뢰구간
+  geom_point(size = 2.5, colour = "#2c3e50") +                                # 팀 하나 = 점 하나
+  ggrepel::geom_text_repel(aes(label = Team), size = 2.4, colour = "grey35",  # 팀 약어 (겹치지 않게)
+                           seed = 1, min.segment.length = 0.3, segment.colour = "grey70") +
+  labs(title = "Role diversity and team net rating, NBA 2024-25",
+       x = "Role diversity (Shannon H', nats)",
+       y = "Net rating (points per 100 possessions)",
+       caption = sprintf("n = 30 teams; per +0.1 nat: %.1f (95%% CI %.1f to %.1f); R2 = %.3f",
+                         coef(m1)[2], ci1[2, 1], ci1[2, 2], summary(m1)$r.squared)) +
+  theme_minimal(base_size = 11) + theme(plot.title = element_text(face = "bold"))
+ggsave(file.path(fig_dir, "Figure1_role_diversity_vs_net_rating.png"), p1, width = 6.4, height = 4.6, dpi = 200)
+```
+
+**Figure 1. Role diversity와 팀 Net rating, NBA 2024–25**
+
+```{r fig1-show, echo = FALSE, out.width = "80%"}
+knitr::include_graphics(file.path(fig_dir, "Figure1_role_diversity_vs_net_rating.png"))
+```
+
+점 하나가 한 팀이다(N = 30). 직선: OLS 적합선, 음영: 평균 Net rating의 95% 신뢰구간. Net rating = 100포제션당 득점 − 실점.
+Role diversity = 5개 역할에 대한 Shannon H′(nat, 인원 기준).
+
+## 6-5. Figure 2
+
+```{r fig2}
+# 모형 2(인원 기준, 주 분석)와 모형 2m(출전시간 기준, 민감도)의 계수와 95% CI를 한 그림에 그린다.
+ci2 <- confint(m2); ci2m <- confint(m2m)
+f2d <- rbind(
+  data.frame(Role = labels4, est = coef(m2)[-1], lo = ci2[-1, 1], hi = ci2[-1, 2],
+             Weight = "Player count (primary)"),
+  data.frame(Role = labels4, est = coef(m2m)[-1], lo = ci2m[-1, 1], hi = ci2m[-1, 2],
+             Weight = "Minutes played (sensitivity)"))
+f2d$Role   <- factor(f2d$Role, levels = rev(labels4))
+f2d$Weight <- factor(f2d$Weight, levels = c("Player count (primary)", "Minutes played (sensitivity)"))
+pd <- position_dodge(width = 0.5)
+p2 <- ggplot(f2d, aes(est, Role, colour = Weight, shape = Weight)) +
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey40") +          # 0 = 연관 없음
+  geom_errorbarh(aes(xmin = lo, xmax = hi), height = 0.15, position = pd) +     # 95% CI 막대
+  geom_point(size = 2.6, position = pd) +                                       # 추정치
+  scale_colour_manual(values = c("#2c3e50", "#e67e22")) +                       # 남색 = 인원, 주황 = 출전시간
+  labs(title = "Association of role composition with net rating",
+       x = "Change in net rating per +10 percentage points of roster share\n(replacing low-usage role players; 95% CI)",
+       y = NULL, colour = NULL, shape = NULL,
+       caption = sprintf("n = 30 teams. Player count: R2 = %.2f, adj. R2 = %.2f. Minutes: R2 = %.2f, adj. R2 = %.2f.",
+                         summary(m2)$r.squared, summary(m2)$adj.r.squared,
+                         summary(m2m)$r.squared, summary(m2m)$adj.r.squared)) +
+  theme_minimal(base_size = 11) +
+  theme(plot.title = element_text(face = "bold"), legend.position = "bottom")
+ggsave(file.path(fig_dir, "Figure2_role_share_coefficients.png"), p2, width = 6.6, height = 4.2, dpi = 200)
+```
+
+**Figure 2. Role composition과 Net rating의 연관성 (모형 2와 출전시간 기준 민감도 분석)**
+
+```{r fig2-show, echo = FALSE, out.width = "80%"}
+knitr::include_graphics(file.path(fig_dir, "Figure2_role_share_coefficients.png"))
+```
+
+점: Low-usage role player 대비 각 역할의 로스터 비중이 10%p 클 때 Net rating의 추정 변화량, 막대: 95% CI(N = 30팀).
+원(남색): 인원 기준 비중(주 분석, 모형 2), 삼각형(주황): 출전시간 기준 비중(민감도 분석, 모형 2m). 점선: 연관 없음.
+
+---
+
+# 7. 결과 ③ 추가 분석 (모두 사전에 정하지 않은 분석)
+
+## 7-1. 출전시간 기준 비중과 다양성 (Table S4)
+
+```{r tabS4}
+save_csv(rbind(tidy(m1m, "M1-min"), tidy(m2m, "M2-min")), "TableS4_minutes_sensitivity.csv")
+tabS4 <- rbind(section("모형 1m: Role diversity (출전시간 기준)"),
+               coef_lines(m1m, c("절편", "Role diversity (출전시간 기준), +0.1 nat당")),
+               section("모형 2m: Role share, 출전시간 기준 (기준: Low-usage role player)"),
+               coef_lines(m2m, c("절편", share_labels)),
+               section("모형 적합도와 예측력"),
+               fit_lines(fits[3, ], fits[4, ], "M1m", "M2m"))
+```
+
+**Table S4. 민감도 분석: 출전시간 기준 역할 비중과 다양성 (OLS, N = 30팀)**
+
+```{r tabS4-show, echo = FALSE}
+show_table(tabS4)
+```
+
+주: Table 2와 같은 모형이며 역할 비중과 Shannon H′를 출전시간 기준으로 계산했다.
+네 비중의 VIF: `r paste(num(vif(m2m), 2), collapse = ", ")`. 사전에 정하지 않은 분석이다.
+
+## 7-2. 2차항 모형과 팀 BPM 통제 모형 (Table S5)
+
+* **2차항:** 다양성이 중간일 때 가장 좋고 너무 낮거나 높으면 나쁜 '역U자' 관계가 있는지 보기 위해
+  H′를 평균 중심화한 뒤 H′²을 모형 1에 더한다.
+* **팀 BPM:** 선수 기량을 통제하기 위해, 각 팀에서 500분 이상 뛴 선수 BPM의 출전시간 가중 평균을 공변량으로 넣는다.
+
+```{r tabS5}
+coef_row <- function(m, term, label, model) {   # 계수 하나의 추정치, 95% CI, p
+  ci <- confint(m)[term, ]
+  data.frame(Model = model, Term = label, Estimate = unname(coef(m)[term]), CI_low = ci[1],
+             CI_high = ci[2], p = summary(m)$coefficients[term, 4], R2 = summary(m)$r.squared,
+             n = nobs(m), row.names = NULL)
+}
+
+# (1) 2차항 모형
+dat$Div_c <- dat$Div01 - mean(dat$Div01)                        # 평균 중심화 (0.1 nat 단위)
+m1q <- lm(NRtg ~ Div_c + I(Div_c^2), data = dat)
+p_quad_F <- anova(lm(NRtg ~ Div_c, data = dat), m1q)$`Pr(>F)`[2]  # 2차항을 더한 효과의 F검정
+
+# (2) 팀 BPM (출전시간 가중 평균)
+bpm <- sapply(split(stints, stints$Team), function(d) weighted.mean(d$BPM, d$MP))
+dat$TeamBPM <- unname(bpm[dat$Team])
+stopifnot(!anyNA(dat$TeamBPM))
+r_bpm_nrtg <- cor(dat$TeamBPM, dat$NRtg)                       # 0.99: BPM은 팀 성적이 반영된 지표
+m1b <- lm(NRtg ~ Div01 + TeamBPM, data = dat)
+m2b <- lm(reformulate(c(paste0(roles4, "_10"), "TeamBPM"), "NRtg"), data = dat)
+
+S5 <- rbind(
+  coef_row(m1q, "Div_c",      "Role diversity (centered), +0.1 nat", "1q"),
+  coef_row(m1q, "I(Div_c^2)", "Role diversity squared",              "1q"),
+  coef_row(m1b, "Div01",      "Role diversity, +0.1 nat",            "1b"),
+  coef_row(m1b, "TeamBPM",    "Team BPM (minutes-weighted), +1",     "1b"),
+  do.call(rbind, lapply(seq_along(roles4), function(i)
+    coef_row(m2b, paste0(roles4[i], "_10"), paste0(labels4[i], ", +10%p"), "2b"))),
+  coef_row(m2b, "TeamBPM",    "Team BPM (minutes-weighted), +1",     "2b"))
+save_csv(S5, "TableS5_quadratic_and_skill_control.csv")
+
+s5_line <- function(i, label) data.frame(항 = label, 추정치 = num(S5$Estimate[i], 2),
+                                         `95% CI` = ci_txt(S5$CI_low[i], S5$CI_high[i]),
+                                         p = pval(S5$p[i]), check.names = FALSE)
+tabS5 <- rbind(
+  section(paste0("모형 1q: 모형 1 + 2차항 (R² = ", num(summary(m1q)$r.squared, 3), ")")),
+  s5_line(1, "Role diversity (중심화), +0.1 nat당"),
+  s5_line(2, "Role diversity², (+0.1 nat)²당"),
+  section(paste0("모형 1b: 모형 1 + 팀 BPM (R² = ", num(summary(m1b)$r.squared, 3), ")")),
+  s5_line(3, "Role diversity, +0.1 nat당"),
+  s5_line(4, "팀 BPM (출전시간 가중), +1당"),
+  section(paste0("모형 2b: 모형 2 + 팀 BPM (R² = ", num(summary(m2b)$r.squared, 3), ")")),
+  do.call(rbind, lapply(1:4, function(i) s5_line(4 + i, share_labels[i]))),
+  s5_line(9, "팀 BPM (출전시간 가중), +1당"))
+```
+
+**Table S5. 추가 민감도 분석: 2차항 모형과 팀 BPM 통제 모형 (OLS, N = 30팀)**
+
+```{r tabS5-show, echo = FALSE}
+show_table(tabS5)
+```
+
+주: 사전에 정하지 않은 분석이다. 모형 1q는 Role diversity를 0.1 nat 단위로 평균 중심화한 뒤 2차항을 더했다
+(2차항 추가 F검정 p = `r num(p_quad_F, 3)`). 팀 BPM = 해당 팀에서 500분 이상 뛴 선수 BPM의 출전시간 가중 평균.
+팀 BPM과 Net rating의 상관은 r = `r num(r_bpm_nrtg, 2)`로, BPM에는 팀 성적에 맞춘 보정이 들어 있어
+모형 1b와 2b는 선수 기량을 통제한 결과로 해석하기 어렵다. 모형 2b의 기준 범주는 Low-usage role player이다.
+
+## 7-3. 군집 수를 바꾼 분석 (Table S6)
+
+```{r tabS6}
+# 3절과 같은 선수 375명, 같은 주성분 점수에서 군집 수(k)만 4, 5, 6으로 바꾸어
+# 역할을 다시 나누고, 인원 기준 H′로 모형 1을 다시 적합한다.
+S6 <- do.call(rbind, lapply(4:6, function(k) {
+  set.seed(123)
+  cl <- kmeans(scores, centers = k, nstart = 1000, iter.max = 100)$cluster
+  st <- stints
+  st$Cl <- cl[match(st$PlayerID, players$PlayerID)]
+  ck <- as.data.frame.matrix(table(st$Team, st$Cl))
+  d  <- data.frame(Team = rownames(ck), H = apply(ck, 1, shannon), row.names = NULL)
+  d  <- merge(d, dat[, c("Team", "NRtg")], by = "Team")
+  d$H01 <- d$H * 10
+  out <- coef_row(lm(NRtg ~ H01, data = d), "H01", "Role diversity, +0.1 nat", paste0("k = ", k))
+  out$H_mean <- mean(d$H); out$H_sd <- sd(d$H); out$H_max_possible <- log(k)
+  out
+}))
+stopifnot("k = 5 결과가 주 분석과 다르다." = abs(S6$Estimate[2] - coef(m1)["Div01"]) < 1e-8)
+save_csv(S6, "TableS6_k_sensitivity.csv")
+
+tabS6 <- data.frame(`군집 수` = c("k = 4", "k = 5 (주 분석)", "k = 6"),
+                    `기울기 (+0.1 nat당)` = num(S6$Estimate, 2),
+                    `95% CI` = ci_txt(S6$CI_low, S6$CI_high), p = pval(S6$p), `R²` = num(S6$R2, 3),
+                    `H′ 평균 (SD)` = paste0(num(S6$H_mean, 2), " (", num(S6$H_sd, 2), ")"),
+                    `H′ 최댓값 (ln k)` = num(S6$H_max_possible, 2), check.names = FALSE)
+```
+
+**Table S6. 군집 수(k)에 따른 모형 1 기울기 (OLS, N = 30팀)**
+
+```{r tabS6-show, echo = FALSE}
+show_table(tabS6)
+```
+
+주: 같은 선수 표본(n = 375)과 주성분 점수에서 k만 바꾸어 k-평균(초기값 1,000개, seed 123)을 다시 적합하고,
+인원 기준 Shannon H′로 모형 1을 다시 추정했다. k가 다르면 H′의 최댓값(ln k)이 달라지므로 기울기를 비교할 때 주의가 필요하다.
+
+## 7-4. 검정력 (방법 › 통계 분석, 고찰 › 한계)
+
+```{r power}
+# 팀이 30개뿐일 때, 유의수준 0.05에서 80% 확률로 잡아낼 수 있는 가장 작은 효과크기(f², R²)를 구한다.
+# 계산식은 pwr 패키지의 pwr.f2.test와 같다 (비중심 모수 = f² × (u + v + 1)).
+#   u = 예측변수 수, v = 30 − u − 1 (잔차 자유도)
+power_f2 <- function(f2, u, v) pf(qf(0.95, u, v), u, v, ncp = f2 * (u + v + 1), lower.tail = FALSE)
+min_f2   <- function(u, v) uniroot(function(f2) power_f2(f2, u, v) - 0.8, c(1e-4, 5))$root
+pw <- data.frame(Model = c("모형 1 (예측변수 1개)", "모형 2 (예측변수 4개)"), u = c(1, 4), v = c(28, 25))
+pw$min_f2      <- mapply(min_f2, pw$u, pw$v)
+pw$min_R2      <- pw$min_f2 / (1 + pw$min_f2)                 # f² = R² / (1 − R²)
+pw$observed_R2 <- c(summary(m1)$r.squared, summary(m2)$r.squared)
+save_csv(pw, "power_sensitivity.csv")
+data.frame(모형 = pw$Model, `검출 가능한 최소 f²` = num(pw$min_f2, 2), `검출 가능한 최소 R²` = num(pw$min_R2, 2),
+           `관찰된 R²` = num(pw$observed_R2, 3), check.names = FALSE)
+```
+
+관찰된 R²(0.013, 0.118)가 검출할 수 있는 최소 R²보다 훨씬 작다. 그래서 이 연구의 결과는
+"연관이 없다"가 아니라 "단일 시즌 30개 팀 자료로는 연관을 **검출하지 못했다**"로 해석한다.
+
+---
+
+# 8. 원고 수치 대조
+
+원고(Manuscript, 2026-11-25 판)의 초록·결과·표에 적은 숫자와 이번 실행 결과를 자동으로 비교한다.
+**모든 행이 `TRUE`이면 원고와 같은 결과가 재현된 것이다.** 하나라도 다르면 문서 끝에서 멈추고 알려 준다.
+
+```{r check}
+# 원고에 적힌 값(원고)과 이번 실행에서 같은 자릿수로 반올림한 값(재실행)
+chk <- function(where, label, ms, x, d) data.frame(위치 = where, 항목 = label, 원고 = ms, 재실행 = round(x, d))
+check <- rbind(
+  chk("결과·Table S1", "분석 대상 팀 수",                   30,     nrow(dat), 0),
+  chk("결과·Table S1", "역할 분류 선수 수",                 375,    nrow(players), 0),
+  chk("결과·Table S1", "팀 집계 선수-팀 기록",              387,    nrow(stints), 0),
+  chk("방법",          "주성분 4개 누적 설명 분산 (%)",     84.6,   100 * summary(pca)$importance[3, 4], 1),
+  chk("결과·Table S3", "Off-ball scorer 선수 수",           108,    sum(players$Role == "OffBallScorer"), 0),
+  chk("결과·Table S3", "Primary creator 선수 수",           58,     sum(players$Role == "PrimaryCreator"), 0),
+  chk("결과·Table S3", "Interior big BLK%",                 4.33,   prof$BLK_pct[4], 2),
+  chk("결과·Table S3", "군집 부트스트랩 ARI 평균",          0.59,   mean(boot_ari), 2),
+  chk("결과·Table 1",  "Role diversity 평균 (nat)",         1.48,   mean(dat$RoleDiversity), 2),
+  chk("결과·Table 1",  "Role diversity SD",                 0.11,   sd(dat$RoleDiversity), 2),
+  chk("결과·Table 1",  "Roster size 평균",                  12.9,   mean(dat$TotalPlayers), 1),
+  chk("초록·Table 2",  "모형 1 기울기 (+0.1 nat당)",        -0.61,  coef(m1)[2], 2),
+  chk("초록·Table 2",  "모형 1 95% CI 하한",                -2.72,  confint(m1)[2, 1], 2),
+  chk("초록·Table 2",  "모형 1 95% CI 상한",                1.49,   confint(m1)[2, 2], 2),
+  chk("결과·Table 2",  "모형 1 p",                          0.554,  summary(m1)$coefficients[2, 4], 3),
+  chk("결과·Table 2",  "모형 1 R²",                         0.013,  fits$R2[1], 3),
+  chk("초록·Table 2",  "모형 2 R²",                         0.118,  fits$R2[2], 3),
+  chk("초록·Table 2",  "모형 2 전체 F검정 p",               0.516,  fits$F_p[2], 3),
+  chk("결과·Table 2",  "Primary creator 계수 (모형 2)",     1.31,   coef(m2)[2], 2),
+  chk("결과·Table 2",  "Interior big 계수 (모형 2)",        2.11,   coef(m2)[5], 2),
+  chk("결과·Table 2",  "LOOCV RMSE: 평균 모형",             6.13,   rmse_null, 2),
+  chk("결과·Table 2",  "LOOCV RMSE: 모형 1",                6.50,   fits$LOOCV_RMSE[1], 2),
+  chk("결과·Table 2",  "LOOCV RMSE: 모형 2",                6.90,   fits$LOOCV_RMSE[2], 2),
+  chk("결과",          "부트스트랩 95% 구간 하한",          -2.07,  boot_ci[1], 2),
+  chk("결과",          "부트스트랩 95% 구간 상한",          2.46,   boot_ci[2], 2),
+  chk("결과",          "Spearman ρ",                        -0.03,  sp$estimate, 2),
+  chk("결과",          "보스턴 제외 기울기",                0.82,   coef(m1_drop)[2], 2),
+  chk("초록·Table S4", "모형 2m 수정 R²",                   0.186,  fits$Adj_R2[4], 3),
+  chk("초록·Table S4", "모형 2m 전체 F검정 p",              0.056,  fits$F_p[4], 3),
+  chk("결과·Table S4", "모형 2m LOOCV RMSE",                5.83,   fits$LOOCV_RMSE[4], 2),
+  chk("결과·Table S4", "모형 1m 기울기",                    -0.27,  coef(m1m)[2], 2),
+  chk("결과·Table S5", "2차항 계수",                        0.79,   coef(m1q)[3], 2),
+  chk("결과·Table S5", "2차항 p",                           0.203,  summary(m1q)$coefficients[3, 4], 3),
+  chk("결과·Table S5", "팀 BPM 모형 다양성 계수",           0.13,   coef(m1b)[2], 2),
+  chk("결과·Table S5", "팀 BPM과 Net rating 상관 r",        0.99,   r_bpm_nrtg, 2),
+  chk("결과·Table S5", "모형 2b Primary creator 계수",      -0.59,  coef(m2b)[2], 2),
+  chk("결과·Table S6", "k = 4 기울기",                      -0.37,  S6$Estimate[1], 2),
+  chk("결과·Table S6", "k = 6 기울기",                      -0.55,  S6$Estimate[3], 2),
+  chk("방법·결과",     "검정력: 모형 1 최소 R²",            0.22,   pw$min_R2[1], 2),
+  chk("방법·결과",     "검정력: 모형 2 최소 R²",            0.32,   pw$min_R2[2], 2),
+  chk("방법·결과",     "검정력: 모형 1 최소 f²",            0.28,   pw$min_f2[1], 2),
+  chk("방법·결과",     "검정력: 모형 2 최소 f²",            0.48,   pw$min_f2[2], 2))
+check$일치 <- abs(check$원고 - check$재실행) < 1e-9
+rownames(check) <- NULL
+knitr::kable(check, align = c("l", "l", "c", "c", "c"))
+cat("일치:", sum(check$일치), "/", nrow(check), "\n")
+stopifnot("원고 수치와 재실행 결과가 다른 항목이 있다. 위 표에서 FALSE인 행을 확인할 것." = all(check$일치))
+```
+
+---
+
+# 9. 실행 환경 기록
+
+```{r session}
+# 나중에 결과가 다르게 나오면 R과 패키지 버전을 비교할 수 있도록 실행 환경을 남긴다.
+sessionInfo()
+```

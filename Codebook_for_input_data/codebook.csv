@@ -1,0 +1,44 @@
+﻿파일,변수 (원자료 이름 → 분석 이름),설명,단위/형식,용도
+advanced.csv,(전체 파일),선수-팀 단위 고급 기록. 1행 = 한 선수의 한 팀 기록. 이적 선수는 팀별 행과 시즌 합계행(2TM/3TM)이 함께 있음. 735행,,"Basketball-Reference, 2024–25 NBA 정규시즌 (직접 내려받음, 재배포하지 않음)"
+advanced.csv,Player-additional → PlayerID,선수 고유 ID. per_game.csv와 결합하는 열쇠,문자,결합
+advanced.csv,Player → Player,선수 이름,문자,Table S3 예시 선수
+advanced.csv,Team → Team,팀 약어. 2TM/3TM = 시즌 중 2·3개 팀에서 뛴 선수의 시즌 합계행,문자,"표본 선정, 팀 집계"
+advanced.csv,Pos → Pos,"등록 포지션 (PG, SG, SF, PF, C)",문자,Table S3의 C·PF %
+advanced.csv,Age → Age,나이 (2025년 2월 1일 기준),세,Table S2
+advanced.csv,MP → MP,출전시간 (해당 팀 또는 시즌 합계),분,"500분 기준, 출전시간 가중"
+advanced.csv,TS% → TS_pct,True shooting percentage = PTS / (2 × (FGA + 0.44 × FTA)),비율 (0–1),역할 분류 지표
+advanced.csv,TRB% → TRB_pct,코트에 있을 때 잡은 가용 리바운드 비율 추정치,% (0–100),역할 분류 지표
+advanced.csv,AST% → AST_pct,코트에 있을 때 팀 동료 필드골 중 어시스트한 비율 추정치,% (0–100),역할 분류 지표
+advanced.csv,STL% → STL_pct,코트에 있을 때 상대 포제션 중 스틸 비율 추정치,% (0–100),역할 분류 지표
+advanced.csv,BLK% → BLK_pct,코트에 있을 때 상대 2점 시도 중 블록 비율 추정치,% (0–100),역할 분류 지표
+advanced.csv,USG% → USG_pct,코트에 있을 때 팀 플레이 중 사용한 비율 추정치,% (0–100),역할 분류 지표
+advanced.csv,BPM → BPM,Box Plus/Minus (팀 성적 보정 포함),100포제션당 점수,Table S5 팀 BPM 공변량
+advanced.csv,그 밖의 열,"G, GS, PER, 3PAr, FTr, ORB%, DRB%, TOV%, OWS, DWS, WS, WS/48, OBPM, DBPM, VORP, Awards 등. 분석에 쓰지 않아 추출하지 않음",,
+per_game.csv,(전체 파일),선수-팀 단위 경기당 기록. 행 구성은 advanced.csv와 같음 (735행),,"Basketball-Reference, 2024–25 NBA 정규시즌 (직접 내려받음, 재배포하지 않음)"
+per_game.csv,"Player-additional → PlayerID, Team → Team",결합 열쇠,문자,결합
+per_game.csv,3PA → FG3A_pg,경기당 3점슛 시도,경기당 개수,역할 분류 지표
+per_game.csv,그 밖의 열,"FG, FGA, PTS 등. 분석에 쓰지 않아 추출하지 않음",,
+team_rating.csv,(전체 파일),팀 단위 레이팅 (30행),,"Basketball-Reference, 2024–25 NBA 정규시즌 (직접 내려받음, 재배포하지 않음)"
+team_rating.csv,Team → TeamName,팀 전체 이름. 코드에서 세 글자 약어(Team)로 바꿈,문자,결합
+team_rating.csv,"W → W, L → L","승, 패",경기 수,Table 1
+team_rating.csv,W/L% → WinPct,승률 = W / 82,비율,Table 1 집단 구분 (.500 이상/미만)
+team_rating.csv,"ORtg → ORtg, DRtg → DRtg","100포제션당 득점, 실점",100포제션당 점수,Table 1
+team_rating.csv,NRtg → NRtg,Net rating = ORtg − DRtg,100포제션당 점수,주 결과변수
+team_rating.csv,그 밖의 열,"Rk, Conf, Div, MOV, MOV/A, ORtg/A, DRtg/A, NRtg/A. 분석에 쓰지 않아 추출하지 않음",,
+players_selected.csv,(전체 파일),1-3절에서 만든 추출 자료: advanced.csv와 per_game.csv에서 위 변수만 골라 선수 ID + 팀으로 결합 (735행 × 14열),,Code/run_all_analysis.Rmd 1-3절이 생성
+teams_selected.csv,(전체 파일),1-3절에서 만든 추출 자료: team_rating.csv에서 위 변수만 고르고 팀 약어(Team)를 붙임 (30행 × 8열),,Code/run_all_analysis.Rmd 1-3절이 생성
+player_roles.csv,(전체 파일),팀 집계에 쓴 선수-팀 기록 (387행: 해당 팀 MP ≥ 500)과 부여된 역할,,4절이 생성
+player_roles.csv,Role,"선수 역할. 선수-시즌 표본(선수당 1행, 시즌 MP ≥ 500, 375명)의 7개 지표를 표준화 → PCA 상위 4개 주성분 → k-평균(k = 5, 초기값 1,000개, seed 123)",범주,역할 분류
+player_roles.csv,  PrimaryCreator,"Primary creator: 사용률·어시스트·3PA가 가장 높음 (예: Anthony Edwards, Devin Booker, James Harden)",,
+player_roles.csv,  SecondaryPlaymaker,"Secondary playmaker: 어시스트·스틸 높고 TS% 낮음 (예: Bam Adebayo, Dyson Daniels, Alperen Şengün)",,
+player_roles.csv,  OffBallScorer,"Off-ball scorer: 3PA 높고 어시스트 낮음 (예: Mikal Bridges, DeMar DeRozan, OG Anunoby)",,
+player_roles.csv,  InteriorBig,"Interior big: 리바운드·블록·TS% 높음 (예: Ivica Zubac, Brook Lopez, Karl-Anthony Towns)",,
+player_roles.csv,  LowUsageRole,"Low-usage role player: 사용률 가장 낮음. 회귀모형의 기준 범주 (예: Josh Hart, Jaden McDaniels, Toumani Camara)",,
+team_analysis_data.csv,(전체 파일),팀 단위 분석 자료 (30행). 4절이 생성. teams_selected.csv의 열 포함,,
+team_analysis_data.csv,PrimaryCreator … LowUsageRole,해당 팀에서 MP ≥ 500인 선수 중 각 역할 선수 수 (5개 열),명,Table 1 Role count
+team_analysis_data.csv,TotalPlayers,해당 팀에서 MP ≥ 500인 선수 수 (Roster size),명,Table 1
+team_analysis_data.csv,TotalMinutes,위 선수들의 해당 팀 출전시간 합,분,출전시간 기준 비중의 분모
+team_analysis_data.csv,<역할>_pct,인원 기준 역할 비중 = 역할 선수 수 / TotalPlayers. 다섯 비중 합 = 1,비율,모형 2 (회귀에는 ×10 = 10%p 단위)
+team_analysis_data.csv,<역할>_min_pct,출전시간 기준 역할 비중 = 역할 출전시간 / TotalMinutes,비율,"모형 2m, Table S4"
+team_analysis_data.csv,RoleDiversity,"Shannon H′ = −Σ pᵢ ln pᵢ (인원 기준, 자연로그, 0 ~ ln 5 = 1.61)",nat,모형 1 (회귀에는 ×10 = 0.1 nat 단위)
+team_analysis_data.csv,RoleDiversity_min,출전시간 기준 비중으로 계산한 Shannon H′,nat,"모형 1m, Table S4"
